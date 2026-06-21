@@ -32,7 +32,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY requirements_avatar.txt .
-RUN pip install --no-cache-dir -r requirements_avatar.txt
+RUN grep -v "torch\|flash.attn\|flash_attn" requirements_avatar.txt > requirements_avatar_filtered.txt && \
+    pip install --no-cache-dir -r requirements_avatar_filtered.txt
 
 RUN pip install --no-cache-dir runpod boto3 "huggingface_hub[hf_transfer,cli]"
 
