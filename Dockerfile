@@ -2,7 +2,7 @@ FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
+ENV CHECKPOINT_DIR=/runpod-volume/weights/LongCat-Video-Avatar-1.5
 
 RUN apt-get update && apt-get install -y \
     python3.10 \
@@ -50,12 +50,6 @@ RUN pip install --no-cache-dir \
     audio-separator
 
 RUN pip install --no-cache-dir runpod boto3 "huggingface_hub[hf_transfer,cli]"
-
-RUN huggingface-cli download meituan-longcat/LongCat-Video \
-    --local-dir /weights/LongCat-Video
-
-RUN huggingface-cli download meituan-longcat/LongCat-Video-Avatar-1.5 \
-    --local-dir /weights/LongCat-Video-Avatar-1.5
 
 COPY . .
 
