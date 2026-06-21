@@ -31,9 +31,22 @@ WORKDIR /LongCat-Video
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY requirements_avatar.txt .
-RUN grep -v "torch\|flash.attn\|flash_attn" requirements_avatar.txt > requirements_avatar_filtered.txt && \
-    pip install --no-cache-dir -r requirements_avatar_filtered.txt
+RUN pip install --no-cache-dir \
+    numpy==1.26.4 \
+    transformers==4.41.0 \
+    loguru==0.7.2 \
+    diffusers==0.35.1 \
+    einops==0.8.0 \
+    ftfy==6.2.0 \
+    av==12.0.0 \
+    opencv-python==4.9.0.80 \
+    streamlit==1.50.0 \
+    pyarrow==20.0.0 \
+    imageio==2.37.0 \
+    imageio-ffmpeg==0.6.0 \
+    librosa \
+    soundfile \
+    audio-separator
 
 RUN pip install --no-cache-dir runpod boto3 "huggingface_hub[hf_transfer,cli]"
 
