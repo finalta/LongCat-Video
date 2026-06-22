@@ -8,6 +8,7 @@ import subprocess
 import binascii
 import shutil
 import boto3
+import librosa
 from botocore.client import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +24,9 @@ R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "")
 R2_SECRET_KEY    = os.getenv("R2_SECRET_KEY", "")
 R2_BUCKET_NAME   = os.getenv("R2_BUCKET_NAME", "")
 R2_PUBLIC_URL    = os.getenv("R2_PUBLIC_URL", "")
+
+# LongCat generates ~3 seconds of video per segment
+SECONDS_PER_SEGMENT = 3.0
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -77,7 +81,6 @@ def download_url(url, path):
 
 
 def resolve_input(job_input, key_path, key_url, key_b64, tmp_path):
-    """Resolve a media input from path / url / base64."""
     if key_path in job_input:
         return job_input[key_path]
     elif key_url in job_input:
@@ -88,7 +91,6 @@ def resolve_input(job_input, key_path, key_url, key_b64, tmp_path):
 
 
 def find_output_video(output_dir):
-    """Walk output_dir and return the first mp4 found."""
     for root, _, files in os.walk(output_dir):
         for f in files:
             if f.endswith(".mp4"):
@@ -96,12 +98,31 @@ def find_output_video(output_dir):
     return None
 
 
+def get_audio_duration(audio_path):
+    try:
+        duration = librosa.get_duration(path=audio_path)
+        logger.info(f"Audio duration: {duration:.2f}s")
+        return duration
+    except Exception as e:
+        logger.warning(f"Could not get audio duration: {e}")
+        return None
+
+
+def calculate_num_segments(audio_path):
+    duration = get_audio_duration(audio_path)
+    if duration is None:
+        logger.warning("Falling back to num_segments=5")
+        return 5
+    segments = max(1, int(duration / SECONDS_PER_SEGMENT) + 1)
+    logger.info(f"Audio {duration:.2f}s → num_segments={segments} (~{SECONDS_PER_SEGMENT}s/segment)")
+    return segments
+
+
 # ── Main handler ──────────────────────────────────────────────────────────────
 
 def handler(job):
     job_input = job.get("input", {})
 
-    # Log input (truncate base64 blobs)
     log_input = {
         k: truncate_b64(v) if "base64" in k else v
         for k, v in job_input.items()
@@ -115,20 +136,16 @@ def handler(job):
     os.makedirs(out_dir, exist_ok=True)
 
     # ── Mode detection ────────────────────────────────────────────────────────
-    # person_count: "single" | "multi"
-    # stage:        "ai2v" (image+audio→video) | "at2v" (text+audio→video)
-    # resolution:   "480p" | "720p"
     person_count = job_input.get("person_count", "single")
-    stage        = job_input.get("stage", "ai2v")          # ai2v or at2v
-    resolution   = job_input.get("resolution", "480p")     # 480p or 720p
-    num_segments = job_input.get("num_segments", 1)         # 1 = single clip, >1 = long video
-    num_steps    = job_input.get("num_inference_steps", 8)  # 8 = distilled (fast), 50 = full
+    stage        = job_input.get("stage", "ai2v")
+    resolution   = job_input.get("resolution", "480p")
+    num_steps    = job_input.get("num_inference_steps", 8)
     ref_img_idx  = job_input.get("ref_img_index", 10)
     mask_range   = job_input.get("mask_frame_range", 3)
     prompt       = job_input.get("prompt", "A person talking naturally, realistic, high quality")
-    audio_type   = job_input.get("audio_type", "para")      # para | add (multi only)
+    audio_type   = job_input.get("audio_type", "para")
 
-    logger.info(f"Mode: person_count={person_count}, stage={stage}, resolution={resolution}, num_segments={num_segments}")
+    logger.info(f"Mode: person_count={person_count}, stage={stage}, resolution={resolution}")
 
     # ── Resolve image ─────────────────────────────────────────────────────────
     image_path = None
@@ -141,7 +158,7 @@ def handler(job):
         if not image_path or not os.path.exists(image_path):
             return {"error": "stage=ai2v requires an image (image_path, image_url, or image_base64)"}
 
-    # ── Resolve audio(s) ─────────────────────────────────────────────────────
+    # ── Resolve audio ─────────────────────────────────────────────────────────
     audio_path = resolve_input(
         job_input,
         "wav_path", "wav_url", "wav_base64",
@@ -158,7 +175,12 @@ def handler(job):
             f"{tmp_dir}/audio_person2.wav"
         )
         if not audio_path_2 or not os.path.exists(audio_path_2):
-            return {"error": "Multi-person mode requires a second audio (wav_path_2, wav_url_2, or wav_base64_2)"}
+            return {"error": "Multi-person mode requires a second audio"}
+
+    # ── Calculate num_segments from audio duration ────────────────────────────
+    # Always calculate from actual audio — never trust the value from frontend
+    num_segments = calculate_num_segments(audio_path)
+    logger.info(f"✅ num_segments (auto-calculated): {num_segments}")
 
     # ── Build input JSON for LongCat ─────────────────────────────────────────
     longcat_input = {"prompt": prompt}
@@ -174,7 +196,6 @@ def handler(job):
             "person2": audio_path_2,
         }
         longcat_input["audio_type"] = audio_type
-        # bbox is optional — if not provided, model uses default half-split
         if "bbox" in job_input:
             longcat_input["bbox"] = job_input["bbox"]
 
@@ -192,7 +213,7 @@ def handler(job):
 
     cmd = [
         "torchrun",
-        "--nproc_per_node=1",           # single GPU on RunPod serverless
+        "--nproc_per_node=1",
         script,
         f"--checkpoint_dir={CHECKPOINT_DIR}",
         f"--input_json={input_json_path}",
@@ -207,7 +228,6 @@ def handler(job):
         "--use_int8",
     ]
 
-    # single only: add stage flag
     if person_count == "single":
         cmd.append(f"--stage_1={stage}")
 
@@ -219,7 +239,7 @@ def handler(job):
             cwd=WORK_DIR,
             capture_output=True,
             text=True,
-            timeout=3600,   # 1hr max
+            timeout=3600,
         )
     except subprocess.TimeoutExpired:
         return {"error": "Inference timed out (>1 hour)"}
@@ -238,7 +258,7 @@ def handler(job):
     file_size = os.path.getsize(output_video)
     logger.info(f"Output video: {output_video} ({file_size} bytes)")
 
-    # ── Upload to R2 → network volume → base64 fallback ──────────────────────
+    # ── Upload to R2 ─────────────────────────────────────────────────────────
     if all([R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_KEY, R2_BUCKET_NAME, R2_PUBLIC_URL]):
         try:
             object_key = f"outputs/longcat_{task_id}.mp4"
@@ -257,16 +277,14 @@ def handler(job):
         except Exception as e:
             logger.error(f"❌ Network volume save failed: {e}")
 
-    # Last resort: base64
     try:
         with open(output_video, "rb") as f:
             video_b64 = base64.b64encode(f.read()).decode("utf-8")
-        logger.warning("⚠️  Returning base64 (R2 and volume both unavailable)")
+        logger.warning("⚠️ Returning base64 (R2 unavailable)")
         return {"video": video_b64}
     except Exception as e:
         return {"error": f"All output methods failed: {e}"}
     finally:
-        # Cleanup temp files
         shutil.rmtree(tmp_dir, ignore_errors=True)
         shutil.rmtree(out_dir, ignore_errors=True)
 
