@@ -43,10 +43,22 @@ RUN pip install --no-cache-dir \
     pyarrow==20.0.0 \
     imageio==2.37.0 \
     imageio-ffmpeg==0.6.0 \
-    librosa \
-    soundfile \
-    audio-separator \
-    pyloudnorm
+    scikit-learn==1.6.1 \
+    scikit-image==0.25.2 \
+    scipy==1.15.3 \
+    soundfile==0.13.1 \
+    soxr==0.5.0.post1 \
+    librosa==0.11.0 \
+    sympy==1.13.1 \
+    pyloudnorm==0.1.1 \
+    nvidia-ml-py==13.580.65 \
+    tzdata==2025.2 \
+    onnx==1.18.0 \
+    onnxruntime==1.16.3 \
+    openai==1.75.0 \
+    cffi==2.0.0 \
+    chardet==5.2.0 \
+    audio-separator==0.30.2
 
 RUN pip install --no-cache-dir runpod boto3 "huggingface_hub[hf_transfer,cli]"
 
