@@ -1,8 +1,6 @@
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
-
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV CHECKPOINT_DIR=/runpod-volume/weights/LongCat-Video-Avatar-1.5
 
 RUN apt-get update && apt-get install -y \
     python3.10 \
@@ -47,12 +45,12 @@ RUN pip install --no-cache-dir \
     imageio-ffmpeg==0.6.0 \
     librosa \
     soundfile \
-    audio-separator
+    audio-separator \
+    pyloudnorm
 
 RUN pip install --no-cache-dir runpod boto3 "huggingface_hub[hf_transfer,cli]"
 
 COPY . .
 
 RUN chmod +x /LongCat-Video/entrypoint.sh
-
 CMD ["/LongCat-Video/entrypoint.sh"]
